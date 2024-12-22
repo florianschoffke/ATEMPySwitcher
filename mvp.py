@@ -4,7 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton,
-    QVBoxLayout, QMessageBox, QScrollArea, QFrame, QComboBox
+    QVBoxLayout, QMessageBox, QScrollArea, QFrame, QComboBox, QHBoxLayout
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyATEMMax import ATEMMax
@@ -33,7 +33,7 @@ class ATEMController(QWidget):
         self.signals.error_message.connect(self.show_error_message)
 
     def init_ui(self):
-        # Create layout
+        # Create main layout
         layout = QVBoxLayout()
 
         # IP Address Label and Entry
@@ -57,16 +57,27 @@ class ATEMController(QWidget):
         separator.setFrameShadow(QFrame.Sunken)
         layout.addWidget(separator)
 
-        # Scan for ATEMs
+        # Scan for ATEMs Label
         self.scan_label = QLabel("Available ATEMs:")
         layout.addWidget(self.scan_label)
 
+        # Dropdown for ATEMs
         self.atem_dropdown = QComboBox()
+        self.atem_dropdown.currentIndexChanged.connect(self.on_atem_selection_changed)
         layout.addWidget(self.atem_dropdown)
 
+        # Horizontal layout for Scan and Use buttons
+        h_layout_buttons = QHBoxLayout()
         self.scan_button = QPushButton("Scan")
         self.scan_button.clicked.connect(self.scan_for_atems)
-        layout.addWidget(self.scan_button)
+        h_layout_buttons.addWidget(self.scan_button)
+
+        self.use_button = QPushButton("Use")
+        self.use_button.setEnabled(False)
+        self.use_button.clicked.connect(self.use_selected_atem)
+        h_layout_buttons.addWidget(self.use_button)
+
+        layout.addLayout(h_layout_buttons)
 
         # Scene List Label
         self.scene_label = QLabel("Available Scenes:")
@@ -125,7 +136,7 @@ class ATEMController(QWidget):
         QMessageBox.critical(self, title, message)
 
     def scan_for_atems(self):
-    # Scan the network for ATEM switchers using a thread pool
+        # Scan the network for ATEM switchers using a thread pool
         print(f"[{time.ctime()}] Scanning network range 192.168.50.* for ATEM switchers")
         self.atem_dropdown.clear()
         results = []
@@ -149,21 +160,59 @@ class ATEMController(QWidget):
         self.atem_dropdown.addItems(results)
         print(f"[{time.ctime()}] FINISHED: {len(results)} ATEM switchers found.")
 
+        # Enable or disable the Use button based on results
+        if len(results) == 0:
+            self.use_button.setEnabled(False)
+        else:
+            # Set the first item as selected and enable Use button
+            self.atem_dropdown.setCurrentIndex(0)
+            self.use_button.setEnabled(True)
+
+    def on_atem_selection_changed(self, index):
+        if self.atem_dropdown.count() > 0 and index >= 0:
+            self.use_button.setEnabled(True)
+        else:
+            self.use_button.setEnabled(False)
+
+    def use_selected_atem(self):
+        selected_ip = self.atem_dropdown.currentText()
+        if selected_ip:
+            self.ip_entry.setText(selected_ip)
+            QMessageBox.information(self, "IP Selected", f"IP {selected_ip} copied to the IP field.")
+        else:
+            QMessageBox.warning(self, "No Selection", "Please select an ATEM from the dropdown.")
 
 def turn_key1(on=bool):
-    # Get the current state of downstream key 1
-    current_state = atem_controller.switcher.keyer[0][1].onAir.enabled
+    # Define constants for nextTransition flags
+    NextTrans_BKGD = 1
+    NextTrans_KEY1 = 2
+    NextTrans_KEY2 = 4
+    NextTrans_KEY3 = 8
+    NextTrans_KEY4 = 16
 
+    # Get the current state of downstream key 1
+    current_state = atem_controller.switcher.transition[0].nextTransition.key1
+    isonair = atem_controller.switcher.keyer[0][1].onAir.enabled
+
+    print(f"Key1 State: {current_state}")
+    print(f"is On Air State: {isonair}")
+    print(f"Should be on: {on}")
     # Check if the current state is different from the desired state
-    if current_state != on:
-        # Toggle the state to match the desired state
-        atem_controller.switcher.setTransitionNextTransition
-        atem_controller.switcher.setDownstreamKeyerTie(0, on)
-        print(f"Downstream key 1 has been {'enabled' if on else 'disabled'} for the next transition.")
+    if ((isonair == False) & (on == True)):
+        if current_state == False:
+            print(f"Switching Key 1 on")
+            atem_controller.switcher.setTransitionNextTransition(1, NextTrans_BKGD + NextTrans_KEY1)
+    elif ((isonair == True) & (on == True)):
+        if current_state == True:
+            print(f"Switching Key 1 off")
+            atem_controller.switcher.setTransitionNextTransition("mixEffect1", NextTrans_BKGD)
+    elif isonair == on:
+        if current_state == True:
+            print(f"Switching Key 1 off")
+            atem_controller.switcher.setTransitionNextTransition("mixEffect1", NextTrans_BKGD)
     else:
         print("No change needed. The downstream key 1 is already in the desired state.")
 
-        
 # Define your scene functions
 def switch_to_speaker():
     if atem_controller.connected:
@@ -201,12 +250,32 @@ def switch_to_slides():
     else:
         print("Not connected to ATEM Switcher.")
 
+def toggle_key_on():
+    if atem_controller.connected:
+        turn_key1(on=True)
+        atem_controller.switcher.setPreviewInputVideoSource(0, 1)
+        atem_controller.switcher.execAutoME(0)
+        print("Switched to Slides")
+    else:
+        print("Not connected to ATEM Switcher.")
+
+def toggle_key_off():
+    if atem_controller.connected:
+        turn_key1(on=False)
+        atem_controller.switcher.setPreviewInputVideoSource(0, 1)
+        atem_controller.switcher.execAutoME(0)
+        print("Switched to Slides")
+    else:
+        print("Not connected to ATEM Switcher.")
+
 # A dictionary of scene IDs to functions and names
 scenes = {
     0: {'name': 'Speaker', 'function': switch_to_speaker},
     1: {'name': 'Music', 'function': switch_to_music},
     2: {'name': 'Slides', 'function': switch_to_slides},
     3: {'name': 'Slides and Speaker', 'function': switch_to_slides_and_key1},
+    4: {'name': 'Toggle Key On', 'function': toggle_key_on},
+    5: {'name': 'Toggle Key Off', 'function': toggle_key_off},
     # Add more scenes as needed
 }
 
