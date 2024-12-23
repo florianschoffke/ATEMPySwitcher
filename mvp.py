@@ -182,34 +182,19 @@ class ATEMController(QWidget):
         else:
             QMessageBox.warning(self, "No Selection", "Please select an ATEM from the dropdown.")
 
+def set_key1(on=bool):
+    atem_controller.switcher.setKeyerOnAirEnabled(0, 0, on)
+
 def turn_key1(on=bool):
-    # Define constants for nextTransition flags
-    NextTrans_BKGD = 1
-    NextTrans_KEY1 = 2
-    NextTrans_KEY2 = 4
-    NextTrans_KEY3 = 8
-    NextTrans_KEY4 = 16
 
-    # Get the current state of downstream key 1
-    current_state = atem_controller.switcher.transition[0].nextTransition.key1
-    isonair = atem_controller.switcher.keyer[0][1].onAir.enabled
+    isonair = atem_controller.switcher.keyer[0][0].onAir.enabled
 
-    print(f"Key1 State: {current_state}")
     print(f"is On Air State: {isonair}")
     print(f"Should be on: {on}")
     # Check if the current state is different from the desired state
-    if ((isonair == False) & (on == True)):
-        if current_state == False:
-            print(f"Switching Key 1 on")
-            atem_controller.switcher.setTransitionNextTransition(1, NextTrans_BKGD + NextTrans_KEY1)
-    elif ((isonair == True) & (on == True)):
-        if current_state == True:
-            print(f"Switching Key 1 off")
-            atem_controller.switcher.setTransitionNextTransition("mixEffect1", NextTrans_BKGD)
-    elif isonair == on:
-        if current_state == True:
-            print(f"Switching Key 1 off")
-            atem_controller.switcher.setTransitionNextTransition("mixEffect1", NextTrans_BKGD)
+    if (isonair != on):
+        print(f"Switching Key 1")
+        set_key1(on)
     else:
         print("No change needed. The downstream key 1 is already in the desired state.")
 
@@ -252,19 +237,13 @@ def switch_to_slides():
 
 def toggle_key_on():
     if atem_controller.connected:
-        turn_key1(on=True)
-        atem_controller.switcher.setPreviewInputVideoSource(0, 1)
-        atem_controller.switcher.execAutoME(0)
-        print("Switched to Slides")
+        set_key1(True)
     else:
         print("Not connected to ATEM Switcher.")
 
 def toggle_key_off():
     if atem_controller.connected:
-        turn_key1(on=False)
-        atem_controller.switcher.setPreviewInputVideoSource(0, 1)
-        atem_controller.switcher.execAutoME(0)
-        print("Switched to Slides")
+        set_key1(False)
     else:
         print("Not connected to ATEM Switcher.")
 
