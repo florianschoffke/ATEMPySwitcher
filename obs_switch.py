@@ -4,7 +4,7 @@ import sys
 # Configuration
 host = "localhost"
 port = 4455  # Default port
-password = "fV6udMhQbZZ84qAK"  # Set this if you have one
+password = "pw"  # Set this if you have one
 
 # Connect to OBS
 ws = obsws(host, port, password)
