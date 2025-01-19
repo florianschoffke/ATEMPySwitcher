@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton,
     QVBoxLayout, QMessageBox, QScrollArea, QFrame, QComboBox, QHBoxLayout
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QObject
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer
 from PyATEMMax import ATEMMax
 from flask import Flask
 
@@ -14,6 +14,7 @@ from flask import Flask
 class Signals(QObject):
     connection_status = pyqtSignal(str)
     error_message = pyqtSignal(str, str)
+    scan_results = pyqtSignal(list)  # New signal for scan results
 
 class ATEMController(QWidget):
     def __init__(self):
@@ -31,6 +32,10 @@ class ATEMController(QWidget):
         # Connect signals
         self.signals.connection_status.connect(self.update_connection_status)
         self.signals.error_message.connect(self.show_error_message)
+        self.signals.scan_results.connect(self.handle_scan_results)  # Connect scan_results signal
+
+        # Start scanning for ATEMs on startup
+        QTimer.singleShot(0, self.scan_for_atems)  # Start scan after UI is shown
 
     def init_ui(self):
         # Create main layout
@@ -49,6 +54,8 @@ class ATEMController(QWidget):
 
         # Connection Status
         self.connection_status_label = QLabel("Not Connected")
+        # Initial style for the status label
+        self.connection_status_label.setStyleSheet("color: red; font-weight: bold;")
         layout.addWidget(self.connection_status_label)
 
         # Separator
@@ -131,34 +138,53 @@ class ATEMController(QWidget):
 
     def update_connection_status(self, status):
         self.connection_status_label.setText(status)
+        if status == "Connected":
+            # Set text green and bold
+            self.connection_status_label.setStyleSheet("color: green; font-weight: bold;")
+        else:
+            # Set text red and bold
+            self.connection_status_label.setStyleSheet("color: red; font-weight: bold;")
 
     def show_error_message(self, title, message):
         QMessageBox.critical(self, title, message)
 
     def scan_for_atems(self):
-        # Scan the network for ATEM switchers using a thread pool
+        # Disable the Scan button to prevent multiple clicks
+        self.scan_button.setEnabled(False)
         print(f"[{time.ctime()}] Scanning network range 192.168.50.* for ATEM switchers")
+
+        def scan():
+            results = []
+            lock = threading.Lock()
+
+            def scan_ip(ip):
+                switcher = ATEMMax()  # Create a new instance for each thread
+                try:
+                    switcher.ping(ip)
+                    if switcher.waitForConnection():
+                        print(f"[{time.ctime()}] ATEM switcher found at {ip}")
+                        with lock:
+                            results.append(ip)
+                finally:
+                    switcher.disconnect()
+
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                ips = [f"192.168.50.{i}" for i in range(1, 255)]
+                executor.map(scan_ip, ips)
+
+            # Emit the results back to the main thread
+            self.signals.scan_results.emit(results)
+
+        # Start the scan in a separate thread
+        threading.Thread(target=scan, daemon=True).start()
+
+    def handle_scan_results(self, results):
         self.atem_dropdown.clear()
-        results = []
-        lock = threading.Lock()
-
-        def scan_ip(ip):
-            switcher = ATEMMax()  # Create a new instance for each thread
-            try:
-                switcher.ping(ip)
-                if switcher.waitForConnection():
-                    print(f"[{time.ctime()}] ATEM switcher found at {ip}")
-                    with lock:
-                        results.append(ip)
-            finally:
-                switcher.disconnect()
-
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            ips = [f"192.168.50.{i}" for i in range(1, 255)]
-            executor.map(scan_ip, ips)
-
         self.atem_dropdown.addItems(results)
         print(f"[{time.ctime()}] FINISHED: {len(results)} ATEM switchers found.")
+
+        # Re-enable the Scan button
+        self.scan_button.setEnabled(True)
 
         # Enable or disable the Use button based on results
         if len(results) == 0:
@@ -167,6 +193,13 @@ class ATEMController(QWidget):
             # Set the first item as selected and enable Use button
             self.atem_dropdown.setCurrentIndex(0)
             self.use_button.setEnabled(True)
+
+        # Check if we found exactly one ATEM, connect automatically
+        if len(results) == 1:
+            # Update the IP entry with the found IP
+            self.ip_entry.setText(results[0])
+            # Start connection in a separate thread
+            threading.Thread(target=self.connect_to_switcher, args=(results[0],), daemon=True).start()
 
     def on_atem_selection_changed(self, index):
         if self.atem_dropdown.count() > 0 and index >= 0:
